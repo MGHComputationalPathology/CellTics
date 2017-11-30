@@ -511,7 +511,7 @@ def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_
 @click.option('--bam-file', '-b', help='Path to bam file')
 @click.option('--merge-distance', '-m', default=9, help='Find all variants within X bases. (default=9)')
 @click.option('--fq-threshold', '-ft', default=0, help='Minimim frequency for grouping. (default=0)')
-@click.option('--min-reads', '-r', default=3, help='Minimum supporting reads')
+@click.option('--min-reads', '-r', default=3, help='Minimum supporting reads (default=3)')
 @click.option('--bam-filter-mode', '-f', default='pab', type=click.Choice(['pab', 'min_pagb', 'max_pagb']),
               help='min_pagb - (default) Minimum probability of A given B.  Value is min of P(A|B) and P(B|A).\n'
                    'max_pagb - Maximum probability of A given B.  Value is max of P(A|B) and P(B|A).'
@@ -519,7 +519,7 @@ def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_
 @click.option('--write-mode', '-w', default='append', type=click.Choice(['append', 'intersect', 'merged_only']),
               help='append - adds merged calls to vcf\nintersect - removes single calls that were merged'
                    '\nmerged_only - outputs only merged calls')
-@click.option('--ref-seq', '-rf', required=True, default=None, type=click.Path(exists=True),
+@click.option('--ref-seq', '-rf', default=None, type=click.Path(exists=True),
               help='Path to reference genome file (required)')
 # pylint: disable=too-many-arguments
 def cli(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_threshold=0, min_reads=3,
