@@ -267,7 +267,7 @@ def check_for_chr(sam):
     return False
 
 
-def inspect_bam(bam_file, variant_dict, threshold, min_reads, filter_type='pagb'):
+def inspect_bam(bam_file, variant_dict, threshold, min_reads, filter_type='min_pagb'):
     """
     Determine whether variant groups are observed on the same read
     :param bam_file:
@@ -289,8 +289,8 @@ def inspect_bam(bam_file, variant_dict, threshold, min_reads, filter_type='pagb'
         vargroup.parse_sam(sam, append_chr)
         if filter_type == 'pab':  # Probability of A and B
             vargroup.set_filter_fq_pab(threshold)
-        if filter_type in ['pagb', 'max_pagb']:  # Probability of A given B.
-            vargroup.set_filter_fq_pagb(threshold, 'm' in filter_type)
+        if filter_type in ['min_pagb', 'max_pagb']:  # Probability of A given B.
+            vargroup.set_filter_fq_pagb(threshold, 'max' in filter_type)
         vargroup.add_filter_min_reads(min_reads)
 
         if vargroup.exists:
@@ -454,31 +454,7 @@ def get_reference_seq_ucsc(chrom, start, end):
     return dna
 
 
-def passes_filter(rec, max_adj_af=0.01, min_alt_fq=0.05, min_dp=5):
-    """
-    Does variant pass the filter
-    """
-    passes = True
-    info = rec.INFO
-    allele_fq = info.get('EXAC_ADJ_AF')
-    alt_allele_fraction = info.get('ALT_AF')
-    alt_depth = info.get('ALT_DP')
-    gatk = info.get('gatk_DETECT')
-    lofreq = info.get('lofreq_DETECT')
-    mutect = info.get('mutect_DETECT')
-    hotspotter = info.get('hotspotter_DETECT')
-    if allele_fq > max_adj_af:
-        passes = False
-    if alt_allele_fraction < min_alt_fq:
-        passes = False
-    if alt_depth < min_dp:
-        passes = False
-    if gatk == 'Y' and 'Y' not in [lofreq, mutect, hotspotter]:
-        passes = False
-    return passes
-
-
-def parse_vcf(reader, merge_distance, max_allele_fraction, min_alt_fq, min_alt_depth, no_filter):
+def parse_vcf(reader, merge_distance):
     """ Read through a sorted VCF file and aggregate candidates for variant merging """
     empty_record = vcf.model._Record(None, 0, None, '', '', '', '', '', '', '')  # pylint: disable=protected-access
     last_record = empty_record
@@ -490,39 +466,36 @@ def parse_vcf(reader, merge_distance, max_allele_fraction, min_alt_fq, min_alt_d
             last_record = empty_record
         elif last_record.start > record.start:
             raise ValueError('VCF must be sorted.')
-        if passes_filter(record, max_allele_fraction, min_alt_fq, min_alt_depth) or no_filter:
-            # if same chromosome, within distance
-            if record.CHROM == last_record.CHROM and record.POS - last_record.POS < merge_distance:
-                # if overlapping, skip
-                if not last_record.end < record.POS:
-                    not_aggregated.append(record)
-                    last_record = record
-                    continue
-                # Add to data structure
-                if current_group is None:
-                    current_group = '_'.join([last_record.CHROM, str(last_record.POS)])
-                    vars_to_group[current_group] = [last_record, record]
-                else:
-                    vars_to_group[current_group].append(record)
-            else:
-                current_group = None
+        # if same chromosome, within distance
+        if record.CHROM == last_record.CHROM and record.POS - last_record.POS < merge_distance:
+            # if overlapping, skip
+            if not last_record.end < record.POS:
                 not_aggregated.append(record)
-            last_record = record
+                last_record = record
+                continue
+            # Add to data structure
+            if current_group is None:
+                current_group = '_'.join([last_record.CHROM, str(last_record.POS)])
+                vars_to_group[current_group] = [last_record, record]
+            else:
+                vars_to_group[current_group].append(record)
+        else:
+            current_group = None
+            not_aggregated.append(record)
+        last_record = record
     return not_aggregated, vars_to_group
 
 
 # pylint: disable=too-many-arguments
 def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_threshold=0, min_reads=3,
-         max_allele_fraction=0.01, min_alt_fq=0.07, min_alt_depth=5, no_filter=False, bam_filter_mode='pagb',
-         write_mode='append', ref_seq=None):
+         bam_filter_mode='pagb', write_mode='append', ref_seq=None):
     """The main function"""
     print('Grouping file: {}'.format(input_file))
     rejected_groups = []
     merge_distance = int(merge_distance)
     reader = vcf.Reader(open(input_file, 'r'))
     original_variants = list(reader)
-    _, vars_to_group = parse_vcf(original_variants, merge_distance, max_allele_fraction, min_alt_fq, min_alt_depth,
-                                 no_filter)
+    _, vars_to_group = parse_vcf(original_variants, merge_distance)
     if bam_file is not None:
         print("Inspecting bam file.")
         vars_to_group, rejected_groups = inspect_bam(bam_file, vars_to_group, fq_threshold, min_reads,
@@ -538,13 +511,9 @@ def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_
 @click.option('--bam-file', '-b', help='Path to bam file')
 @click.option('--merge-distance', '-m', default=9, help='Find all variants within X bases. (default=9)')
 @click.option('--fq-threshold', '-ft', default=0, help='Minimim frequency for grouping. (default=0)')
-@click.option('--max-allele-fraction', '-af', default=0.01, help='Max allele fraction (EXAC_ADF_AF)')
 @click.option('--min-reads', '-r', default=3, help='Minimum supporting reads')
-@click.option('--min-alt-fq', '-fq', default=0.05, help='Min alternative fraction (ALT_AF)')
-@click.option('--min-alt-depth', '-d', default=5, help='Min alternative depth (ALT_DP)')
-@click.option('--no-filter', '-n', is_flag=True, help='Skip variant filtering')
-@click.option('--bam-filter-mode', '-f', default='pab', type=click.Choice(['pab', 'pagb', 'max_pagb']),
-              help='pagb - (default) Minimum probability of A given B.  Value is min of P(A|B) and P(B|A).\n'
+@click.option('--bam-filter-mode', '-f', default='pab', type=click.Choice(['pab', 'min_pagb', 'max_pagb']),
+              help='min_pagb - (default) Minimum probability of A given B.  Value is min of P(A|B) and P(B|A).\n'
                    'max_pagb - Maximum probability of A given B.  Value is max of P(A|B) and P(B|A).'
                    'pab - Probability of A and B\n')
 @click.option('--write-mode', '-w', default='append', type=click.Choice(['append', 'intersect', 'merged_only']),
@@ -553,15 +522,13 @@ def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_
 @click.option('--ref-seq', '-rf', required=True, default=None, type=click.Path(exists=True),
               help='Path to reference genome file (required)')
 # pylint: disable=too-many-arguments
-def cli(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_threshold=0, max_allele_fraction=0.01,
-        min_reads=3, min_alt_fq=0.07, min_alt_depth=5, no_filter=False, bam_filter_mode='pagb', write_mode='append',
-        ref_seq=None):
+def cli(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_threshold=0, min_reads=3,
+        bam_filter_mode='min_pagb', write_mode='append', ref_seq=None):
     """
     Group variants in vcf
     """
     main(input_file=input_file, output_file=output_file, bam_file=bam_file, merge_distance=merge_distance,
-         fq_threshold=fq_threshold, max_allele_fraction=max_allele_fraction, min_reads=min_reads, min_alt_fq=min_alt_fq,
-         min_alt_depth=min_alt_depth, no_filter=no_filter, bam_filter_mode=bam_filter_mode, write_mode=write_mode,
+         fq_threshold=fq_threshold, min_reads=min_reads, bam_filter_mode=bam_filter_mode, write_mode=write_mode,
          ref_seq=ref_seq)
 
 

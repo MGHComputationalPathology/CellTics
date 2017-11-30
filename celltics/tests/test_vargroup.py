@@ -140,8 +140,7 @@ def test_vargroup_pagb():
     vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_out.vcf')
     output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_output_pagb.vcf')
     vg.main(input_file=vcf_in, output_file=output_file, bam_file=bam, merge_distance=1000, fq_threshold=50,
-            max_allele_fraction=0.01, min_alt_fq=0.07, min_alt_depth=5, no_filter=True, bam_filter_mode='max_pagb',
-            write_mode='merged_only')
+            bam_filter_mode='max_pagb', write_mode='merged_only')
     assert_true(filecmp.cmp(vcf_out, output_file))
 
 
@@ -152,8 +151,7 @@ def test_vargroup_append():
     vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_append_out.vcf')
     output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_append_output.vcf')
     vg.main(input_file=vcf_in, output_file=output_file, bam_file=bam, merge_distance=50, fq_threshold=50,
-            min_reads=3, no_filter=True, write_mode='append',
-            bam_filter_mode='pagb')
+            min_reads=3, write_mode='append', bam_filter_mode='min_pagb')
     assert_true(filecmp.cmp(vcf_out, output_file))
 
 
@@ -164,8 +162,7 @@ def test_vargroup():
     vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_out.vcf')
     output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_output.vcf')
     vg.main(input_file=vcf_in, output_file=output_file, bam_file=bam, merge_distance=1000, fq_threshold=5,
-            max_allele_fraction=0.01, min_alt_fq=0.07, min_alt_depth=5, no_filter=True, write_mode='merged_only',
-            bam_filter_mode='pab')
+            write_mode='merged_only', bam_filter_mode='pab')
     assert_true(filecmp.cmp(vcf_out, output_file))
 
 
