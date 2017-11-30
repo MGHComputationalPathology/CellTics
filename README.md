@@ -8,8 +8,8 @@ source venv/bin/activate
 python setup.py install
 ```
 
-## VarGrouper
-A tool to create one vcf row from multiple vcf rows
+## VarGroup
+Scans a vcf file and combines multiple nearby SNPs and indels into a single genomic event.
 
 ### Simplest vargroup command
 ```
