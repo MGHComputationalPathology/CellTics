@@ -27,4 +27,5 @@ If a reference sequence is not supplied the UCSC hg19 api is queried ([http://ge
 
 ### Contact
 
-[Allison MacLeay](mailto:amacleay@mgh.harvard.edu)
+* [Allison MacLeay](mailto:amacleay@mgh.harvard.edu)
+* [Ryan Schmidt](mailto:RSCHMIDT@BWH.HARVARD.EDU)
