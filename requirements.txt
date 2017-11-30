@@ -1,0 +1,8 @@
+click
+flake8
+biopython
+nose
+pysam
+pyvcf
+xmltodict
+numpy
