@@ -5,23 +5,71 @@ MGH CID VarGroup
 Merge variant calls within a certain distance to one call
 Started by Ryan Schmidt in R - https://bitbucket.org/mghcid/cidtools/branch/rs_variant_aggregator
 Pythonized by Allison MacLeay
-"""
 
+"""
 from __future__ import print_function
 from __future__ import absolute_import
 
+import pandas as pd
 from Bio import SeqIO
 import click
 import vcf
 from urllib2 import urlopen, URLError
 from xml.parsers.expat import ExpatError
 import xmltodict
+from collections import OrderedDict, defaultdict
 import pysam
 import numpy as np
 from celltics.lib import CIGAR_CODES
+from celltics.lib import chunks
+import time
+import multiprocessing as mp
+import itertools
 
 
 MAX_GROUPED = 200
+
+
+class PickleMe(object):
+    """ Errors with the pickle library resulted in the need to remove the CallData objects from vcf.model.Record"""
+    def __init__(self, records, var_dict):
+        """ Clean data """
+        self.records = [self.flatten(rec) for rec in records]
+        self.var_dict = self.get_reverse_dict(var_dict)
+
+    @staticmethod
+    def get_reverse_dict(variant_groups):
+        """
+        :param variant_groups:
+        :return: Reversed dictionary from variant to the group they were in
+        """
+        rev_dict = defaultdict(list)
+        for group in variant_groups:
+            for variant in variant_groups[group]:
+                variant_id = get_id(variant)
+                rev_dict[variant_id].append(group)
+        return rev_dict
+
+    def flatten(self, variant):
+        """ remove CallData from variant group lists
+            causes sample data string (ex.  ./.:0/1:203,16:8.0:219:0.073:.:.:.:.:.:.:.:.) omission from grouped variants
+        """
+        for sample in variant.samples:
+            sample.data = None
+        return variant
+
+    def get_fat(self):
+        """ convert data flattened for the pickle library to original version (or close to it) """
+        if len(self.records) == 0:
+            return self.records, self.var_dict
+        fields = [fld for fld in self.records[0].FORMAT.split(':')]
+        calldata = vcf.model.make_calldata_tuple(fields)
+        args = ['./.']
+        args.extend([None for _ in fields[1:]])
+        cd_obj = calldata(*args)
+        for rec in self.records:
+            rec.samples[0].data = cd_obj
+        return self.records, self.var_dict
 
 
 class VariantGroup(object):
@@ -109,15 +157,60 @@ class VariantGroup(object):
 
     def parse_sam(self, sam_handle, append_chr=False):
         """ Set counts of dual coverage and variant presence """
-        reads_existence, reads_coverage = [], []
-        for read in sam_handle.fetch(self.get_chr(append_chr), self.pos, self.end):
-            if read.is_duplicate:
-                continue
-            existence, coverage = self._build_existence_array(read)
-            reads_existence.append(existence)
-            reads_coverage.append(coverage)
-        if len(reads_existence) < 1:
+        vargroup_reads = np.asarray([read
+                                     for read in sam_handle.fetch(self.get_chr(append_chr), self.pos, self.end)
+                                     if not read.is_duplicate])
+
+        # Convert some key read information into a dataframe to speed up filtering
+        read_df = pd.DataFrame(columns=['rn', 'start', 'end', 'read', 'indels'],
+                               data=[(rn, read.reference_start, read.aend, read, self._get_indel_from_cigar(read.cigar))
+                                     for rn, read in enumerate(vargroup_reads)])
+
+        reads_coverage = np.zeros((len(vargroup_reads), len(self.variant_list)))
+        reads_existence = np.zeros((len(vargroup_reads), len(self.variant_list)))
+
+        if len(vargroup_reads) == 0:
             print('Warning: No reads found at {}:{}-{}'.format(self.chrom, self.pos, self.end))
+            return self._build_existence_matrix(reads_existence, reads_coverage)
+
+        # pylint: disable=invalid-name
+        for vn, variant in enumerate(self.variant_list):
+            # Cache variant properties: those lookups are expensive in PySam
+            var_type = variant.var_type
+            is_indel = variant.is_indel
+            is_deletion = variant.is_deletion
+
+            read_overlap_mask = (read_df['start'] <= variant.POS) & (read_df['end'] >= variant.POS)
+
+            # Coverage is easy: all reads which overlap this variant get a coverage of 1
+            reads_coverage[read_overlap_mask, vn] = 1
+
+            # SNPs
+            if var_type == 'snp':
+                for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],
+                                                       read_df[read_overlap_mask]['read'],
+                                                       read_df[read_overlap_mask]['indels']):
+                    # get start position using the cigar string to find the offset
+                    variant_start = self._get_start(variant, read.reference_start, read.cigar, ignore_softclip=True)
+                    # If the base matches the alternate read add it to the existence array
+                    read_alt = read.query[variant_start: variant.end - variant.POS + variant_start + 1]
+                    if read_alt == variant.ALT[0].sequence:
+                        reads_existence[rn, vn] = 1
+
+            # Insertions/Deletions
+            elif is_indel:
+                for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],
+                                                       read_df[read_overlap_mask]['read'],
+                                                       read_df[read_overlap_mask]['indels']):
+                    iloc = self._get_indel_pos(variant.POS, read)
+                    # If the insertion/deletion exist in the cigar string add it to the existence array
+                    if is_deletion and iloc in indels and indels[iloc][0] == 'D':  # Deletions
+                        reads_existence[rn, vn] = 1
+                    elif not is_deletion and iloc in indels and indels[iloc][0] == 'I':  # Insertions
+                        if variant.ALT[0] == read.seq[iloc:iloc + 1 + indels[iloc][1]]:
+                            reads_existence[rn, vn] = 1
+            else:
+                print('Warning: Unknown type found: {}'.format(variant.var_type))
 
         self._build_existence_matrix(reads_existence, reads_coverage)
 
@@ -192,67 +285,42 @@ class VariantGroup(object):
         """
         indels = self._get_indel_from_cigar(cigar, ignore_softclip)
         start = variant.POS - reference_start - 1
-        for pos in indels:
+        for pos, val in indels.iteritems():
             if pos > start:
                 break
-            if indels[pos][0] == 'I':
-                start += indels[pos][1]
-            elif indels[pos][0] == 'D':
-                start -= indels[pos][1]
+            if val[0] == 'I':
+                start += val[1]
+            elif val[0] == 'D':
+                start -= val[1]
         return start
 
-    def _build_existence_array(self, read):
-        """
-        Get array of 0 and 1 signifying whether the nth variant was observed in this read
-        :param read: PySam read object
-        :param vargroup: VariantGroup object
-        :return: array of 0 and 1 [0,0,0,1]
-        """
-        existence = np.zeros(len(self.variant_list))
-        coverage = np.zeros(len(self.variant_list))
-        # pylint: disable=invalid-name
-        for vn, variant in enumerate(self.variant_list):
-            if variant.POS < read.reference_start or variant.POS > read.aend:
-                continue
-            coverage[vn] = 1
-            # SNPs
-            if variant.var_type == 'snp':
-                # get start position using the cigar string to find the offset
-                variant_start = self._get_start(variant, read.reference_start, read.cigar, ignore_softclip=True)
-                # If the base matches the alternate read add it to the existence array
-                if read.query[variant_start: variant.end - variant.POS + variant_start + 1] == variant.ALT[0].sequence:
-                    existence[vn] = 1
-            # Insertions/Deletions
-            elif variant.is_indel:
-                indels = self._get_indel_from_cigar(read.cigar)
-                iloc = variant.POS - read.reference_start + read.query_alignment_start - 1
-                # If the insertion/deletion exist in the cigar string add it to the existence array
-                if variant.is_deletion and iloc in indels and indels[iloc][0] == 'D':  # Deletions
-                    existence[vn] = 1
-                elif not variant.is_deletion and iloc in indels and indels[iloc][0] == 'I':  # Insertions
-                    if variant.ALT[0] == read.seq[iloc:iloc + 1 + indels[iloc][1]]:
-                        existence[vn] = 1
-            else:
-                print('Warning: Unknown type found: {}'.format(variant.var_type))
-        return existence, coverage
+    def _get_indel_pos(self, variant_pos, read):
+        """ Get position of indel """
+        hardclipped = 0 if read.cigartuples[0][0] != 5 else read.cigartuples[0][1]  # read location must be adjusted for
+        # number of hardclipped bases represented in cigar but not in read_seq  https://www.biostars.org/p/119537/
+        iloc = variant_pos - read.reference_start + read.query_alignment_start - 1 + hardclipped
+        return iloc
 
     def _build_existence_matrix(self, reads_existence, reads_coverage):
         self.exists = False
-        if len(reads_existence) < 1:
-            pass
-        for existence, coverage in zip(reads_existence, reads_coverage):  # for each read
-            # pylint: disable=consider-using-enumerate
-            for i in range(len(existence)):  # for each variant
-                for j in range(i):  # create a relationship matrix
-                    if existence[i] == 1 and existence[j] == 1:  # if both variants exist
-                        self.existence_array[i][j] += 1
-                        self.exists = True
-                    if existence[i] == 1 and existence[j] == 0:  # if a not b
-                        self.a_not_b_array[i][j] += 1
-                    if existence[i] == 0 and existence[j] == 1:  # if b not a
-                        self.b_not_a_array[i][j] += 1
-                    if coverage[i] == 1 and coverage[j] == 1:  # if there was coverage for both variant locations
-                        self.coverage_array[i][j] += 1
+        if reads_existence.shape[0] == 0:
+            return
+
+        n_variants = len(self.variant_list)
+        self.coverage_array = np.zeros((n_variants, n_variants))
+        self.existence_array = np.zeros((n_variants, n_variants))
+        self.a_not_b_array = np.zeros((n_variants, n_variants))
+        self.b_not_a_array = np.zeros((n_variants, n_variants))
+
+        for i in xrange(n_variants):  # for each variant
+            for j in xrange(i):  # create a relationship matrix
+                covered = (reads_coverage[:, i] == 1) & (reads_coverage[:, j] == 1)
+                self.coverage_array[i, j] = np.sum(covered)
+                self.existence_array[i, j] = np.sum((reads_existence[:, i] == 1) & (reads_existence[:, j] == 1))
+                self.a_not_b_array[i, j] = np.sum((reads_existence[:, i] == 1) & (reads_existence[:, j] == 0) & covered)
+                self.b_not_a_array[i, j] = np.sum((reads_existence[:, i] == 0) & (reads_existence[:, j] == 1) & covered)
+
+        self.exists = np.any(self.existence_array > 0)
 
     def _get_existence_frequency(self):
         """ Calculate Frequency of 2 variants occurring together """
@@ -267,7 +335,7 @@ def check_for_chr(sam):
     return False
 
 
-def inspect_bam(bam_file, variant_dict, threshold, min_reads, filter_type='min_pagb'):
+def inspect_bam(bam_file, variant_dict, threshold, min_reads, filter_type='pagb'):
     """
     Determine whether variant groups are observed on the same read
     :param bam_file:
@@ -289,8 +357,8 @@ def inspect_bam(bam_file, variant_dict, threshold, min_reads, filter_type='min_p
         vargroup.parse_sam(sam, append_chr)
         if filter_type == 'pab':  # Probability of A and B
             vargroup.set_filter_fq_pab(threshold)
-        if filter_type in ['min_pagb', 'max_pagb']:  # Probability of A given B.
-            vargroup.set_filter_fq_pagb(threshold, 'max' in filter_type)
+        if filter_type in ['pagb', 'max_pagb']:  # Probability of A given B.
+            vargroup.set_filter_fq_pagb(threshold, 'm' in filter_type)
         vargroup.add_filter_min_reads(min_reads)
 
         if vargroup.exists:
@@ -317,49 +385,6 @@ def get_id(variant):
     :return: chrom_pos_ref_alt
     """
     return '{}_{}_{}_{}'.format(variant.CHROM, variant.POS, variant.REF, variant.ALT[0])
-
-
-def get_reverse_dict(variant_groups):
-    """
-    :param variant_groups:
-    :return: Reversed dictionary from variant to the group they were in
-    """
-    rev_dict = {}
-    for group in variant_groups:
-        for variant in variant_groups[group]:
-            variant_id = get_id(variant)
-            if variant_id not in rev_dict:
-                rev_dict[variant_id] = []
-            rev_dict[variant_id].append(group)
-    return rev_dict
-
-
-def merge(variant_dict, unmerged, output_file, reader, ref_seq, mode='append'):
-    """
-    Return merged variant calls
-    """
-    # pylint: disable=protected-access
-    reader.infos['GROUP_ID'] = vcf.parser._Info('GROUP_ID', 0, 'String', 'Group ID given by VarGrouper', '', '')
-    # pylint: disable=protected-access
-    reader.infos['IN_GROUP'] = vcf.parser._Info('IN_GROUP', 0, 'String', 'VarGrouper group ID this variant was put in',
-                                                '', '')
-    writer = vcf.Writer(open(output_file, 'w+'), template=reader)
-    if mode != 'merged_only':
-        var_map = get_reverse_dict(variant_dict)
-        for record in unmerged:
-            record_id = get_id(record)
-            rec_status = var_map.get(record_id, '')
-            if mode != 'intersect' or rec_status == '':
-                record = append_group_info(record, rec_status)
-                writer.write_record(record)
-    if ref_seq:
-        fdict = SeqIO.to_dict(SeqIO.parse(ref_seq, 'fasta'))
-    else:
-        fdict = None
-    for var in variant_dict:
-        record = merge_records(variant_dict[var], var, seq_dict=fdict)
-        writer.write_record(record)
-    writer.close()
 
 
 def merge_records(variants, group_id, seq_dict=None):
@@ -403,7 +428,7 @@ def merge_records(variants, group_id, seq_dict=None):
     alt_obj = vcf.model._Substitution(alt)  # pylint: disable=protected-access
     # CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO, FORMAT, sample_indexes, samples=None
     # pylint: disable=protected-access
-    return vcf.model._Record(chrom, start, variants[0].ID, ref, [alt_obj], agg_qual / nvariants, '', info,
+    return vcf.model._Record(chrom, start, variants[0].ID, ref, [alt_obj], agg_qual / nvariants, None, info,
                              variants[0].FORMAT, variants[0]._sample_indexes, variants[0].samples)
 
 
@@ -454,11 +479,11 @@ def get_reference_seq_ucsc(chrom, start, end):
     return dna
 
 
-def parse_vcf(reader, merge_distance):
+def parse_vcf(reader, merge_distance, skip_overlap):
     """ Read through a sorted VCF file and aggregate candidates for variant merging """
     empty_record = vcf.model._Record(None, 0, None, '', '', '', '', '', '', '')  # pylint: disable=protected-access
     last_record = empty_record
-    vars_to_group = {}
+    vars_to_group = OrderedDict()
     not_aggregated = []
     current_group = None
     for record in reader:
@@ -468,8 +493,8 @@ def parse_vcf(reader, merge_distance):
             raise ValueError('VCF must be sorted.')
         # if same chromosome, within distance
         if record.CHROM == last_record.CHROM and record.POS - last_record.POS < merge_distance:
-            # if overlapping, skip
-            if not last_record.end < record.POS:
+            # add if overlapping, because it will get detangled after.  Skip overlap is True when bam_file is None
+            if not last_record.end < record.POS and skip_overlap:
                 not_aggregated.append(record)
                 last_record = record
                 continue
@@ -486,51 +511,176 @@ def parse_vcf(reader, merge_distance):
     return not_aggregated, vars_to_group
 
 
-# pylint: disable=too-many-arguments
-def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_threshold=0, min_reads=3,
-         bam_filter_mode='pagb', write_mode='append', ref_seq=None):
-    """The main function"""
-    print('Grouping file: {}'.format(input_file))
-    rejected_groups = []
-    merge_distance = int(merge_distance)
-    reader = vcf.Reader(open(input_file, 'r'))
-    original_variants = list(reader)
-    _, vars_to_group = parse_vcf(original_variants, merge_distance)
+def dict_chunks(udict, nchunks):
+    """ Chunk dictionary """
+    cbr = []  # candidate breaks (at chromosome splits)
+    sizes = {}
+    chroms = {}
+    ukeys = sorted(udict.keys())
+    last = None
+    tsize = 0
+    for i, k in enumerate(ukeys):
+        tsize += 1
+        chrom = k.split('_')[0]
+        if chrom != last:
+            cbr.append(i)
+            sizes[last] = tsize  # TODO - balance split on size
+            chroms[i] = chrom
+            tsize = 0
+        last = chrom
+    chrom_chunks = chunks(nchunks, chroms.values())
+    cloc = {}
+    for i, chrom_arr in enumerate(chrom_chunks):
+        for chrom in chrom_arr:
+            cloc[chrom] = i
+    cdict = [OrderedDict() for _ in chrom_chunks]
+    for dkey in udict:
+        chrom = dkey.split('_')[0]
+        cdict[cloc[chrom]][dkey] = udict[dkey]
+    return cdict, cloc
+
+
+def get_ref_seq_dict(ref_seq):
+    """ get ref seq dict """
+    return SeqIO.to_dict(SeqIO.parse(ref_seq, 'fasta')) if ref_seq else None
+
+
+def get_merged_records(variant_dict, fdict):
+    """
+        Return merged variant calls
+    """
+    records = []
+    for var in variant_dict:
+        record = merge_records(variant_dict[var], var, seq_dict=fdict)
+        records.append(record)
+    return records
+
+
+def bam_and_merge(bam_file, vars_to_group, fq_threshold, min_reads, filter_type, fdict):
+    """ inspect bam and merge records """
     if bam_file is not None:
-        print("Inspecting bam file.")
-        vars_to_group, rejected_groups = inspect_bam(bam_file, vars_to_group, fq_threshold, min_reads,
-                                                     filter_type=bam_filter_mode)
-    print("Merging records.")
-    merge(vars_to_group, original_variants, output_file, reader, ref_seq, write_mode)
-    print("Found %s variants to merge\nRejected groups: %s" % (len(vars_to_group.keys()), len(rejected_groups)))
+        print('Processing bam: {}'.format(bam_file))
+        vars_to_group, _ = inspect_bam(bam_file, vars_to_group, fq_threshold, min_reads, filter_type)
+    return PickleMe(get_merged_records(vars_to_group, fdict), vars_to_group)
+
+
+def write_vcf(records, var_dict, output_file, reader, original_variants, write_mode):
+    """
+    Write merged variant calls to vcf
+    """
+    # pylint: disable=protected-access
+    reader.infos['GROUP_ID'] = vcf.parser._Info('GROUP_ID', 0, 'String', 'Group ID given by VarGrouper', 'VarGrouper',
+                                                '2.0')
+    # pylint: disable=protected-access
+    reader.infos['IN_GROUP'] = vcf.parser._Info('IN_GROUP', 0, 'String', 'VarGrouper group ID this variant was put in',
+                                                'VarGrouper', '2.0')
+    with open(output_file, 'w+') as ovcf:
+        writer = vcf.Writer(ovcf, template=reader)
+        if write_mode != 'merged_only':
+            for record in original_variants:
+                rec_id = get_id(record)
+                rec_status = var_dict.get(rec_id, '')
+                if write_mode != 'intersect' or rec_status == '':
+                    append_group_info(record, rec_status)
+                    writer.write_record(record)
+        for record in records:
+            writer.write_record(record)
+
+
+def split_ref_seq(fdict, cloc, nthreads):
+    """ Fix shared memory error with multiprocessing by splitting reference dictionary """
+    if fdict is None:
+        return [None for _ in range(nthreads)]
+    ref_array = [{} for _ in range(nthreads)]
+    for chrom in cloc:
+        ref_array[cloc[chrom]][chrom] = fdict[chrom]
+    return ref_array
+
+
+# pylint: disable=too-many-locals
+def bam_and_merge_multiprocess(bam_file, vars_to_group, fq_threshold, min_reads, bam_filter_mode, ref_seq, nthreads,
+                               debug=False):
+    """ Multiprocess inspect bam and merge step together """
+    fdict = None
+    if bam_file is not None:
+        if ref_seq is not None:
+            print('Opening reference sequence: {}'.format(ref_seq))
+        fdict = get_ref_seq_dict(ref_seq)
+    start = time.time()
+    var_chunks, chrom_pos = dict_chunks(vars_to_group, nthreads)
+    refs = split_ref_seq(fdict, chrom_pos, len(var_chunks))
+    del fdict
+    if not debug:
+        pool = mp.Pool(processes=nthreads)
+        res = [pool.apply_async(bam_and_merge, args=(bam_file, achunk, fq_threshold, min_reads, bam_filter_mode,
+                                                     ref)) for achunk, ref in zip(var_chunks, refs)]
+        pool.close()
+    else:
+        res = [bam_and_merge(bam_file, achunk, fq_threshold, min_reads, bam_filter_mode, ref)
+               for achunk, ref in zip(var_chunks, refs)]
+    records = []
+    var_dict = {}
+    for r in res:
+        recs, var_dict_part = r.get().get_fat() if not debug else r.get_fat()
+        records.extend(recs)
+        var_dict.update(var_dict_part)
+    how_long = time.time() - start
+    print("%d seconds to process with %d threads" % (how_long, nthreads))
+    return records, var_dict
+
+
+# pylint: disable=too-many-arguments,too-many-locals
+def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_threshold=0, min_reads=3,
+         bam_filter_mode='pagb', write_mode='append', ref_seq=None, threads=None, debug=False):
+    """the main function"""
+    nthreads = mp.cpu_count() if threads is None else min(threads, mp.cpu_count())
+    print('Grouping file: {}'.format(input_file))
+    merge_distance = int(merge_distance)
+    with open(input_file, 'r') as openfile:
+        reader = vcf.Reader(openfile)
+        original_variants = list(reader)
+        _, vars_to_group = parse_vcf(original_variants, merge_distance, bam_file is None)
+        n_candidates = len(vars_to_group)
+        records, var_dict = bam_and_merge_multiprocess(bam_file, vars_to_group, fq_threshold, min_reads,
+                                                       bam_filter_mode, ref_seq, nthreads, debug)
+        write_vcf(records, var_dict, output_file, reader, original_variants, write_mode)
+    print("Found %s variants to merge\nRejected groups: %s" % (len(records), n_candidates - len(records)))
 
 
 @click.group(invoke_without_command=True)
-@click.option('--input-file', '-i', required=True, type=click.Path(exists=True), help='Path to input vcf file')
-@click.option('--output-file', '-o', required=True, help='Path to output vcf file')
+@click.option('--input-file', '-i', required=True, type=click.Path(exists=True), help='Path to input VarVetter input file (required)')
+@click.option('--output-file', '-o', required=True, help='Path to output VarVetter input file (required)')
 @click.option('--bam-file', '-b', help='Path to bam file')
 @click.option('--merge-distance', '-m', default=9, help='Find all variants within X bases. (default=9)')
 @click.option('--fq-threshold', '-ft', default=0, help='Minimim frequency for grouping. (default=0)')
 @click.option('--min-reads', '-r', default=3, help='Minimum supporting reads (default=3)')
-@click.option('--bam-filter-mode', '-f', default='pab', type=click.Choice(['pab', 'min_pagb', 'max_pagb']),
-              help='min_pagb - (default) Minimum probability of A given B.  Value is min of P(A|B) and P(B|A).\n'
+@click.option('--bam-filter-mode', '-f', default='pab', type=click.Choice(['pab', 'pagb', 'max_pagb']),
+              help='pagb - (default) Minimum probability of A given B.  Value is min of P(A|B) and P(B|A).\n'
                    'max_pagb - Maximum probability of A given B.  Value is max of P(A|B) and P(B|A).'
                    'pab - Probability of A and B\n')
 @click.option('--write-mode', '-w', default='append', type=click.Choice(['append', 'intersect', 'merged_only']),
-              help='append - adds merged calls to vcf\nintersect - removes single calls that were merged'
+              help='append - (default) adds merged calls to vcf\nintersect - removes single calls that were merged'
                    '\nmerged_only - outputs only merged calls')
 @click.option('--ref-seq', '-rf', default=None, type=click.Path(exists=True),
               help='Path to reference genome file (required)')
+@click.option('--threads', '-t', default=None, help='Number of threads')
+@click.option('--debug', '-db', is_flag=True, default=False, help='Run in debug mode (No multiprocessing)')
 # pylint: disable=too-many-arguments
 def cli(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_threshold=0, min_reads=3,
-        bam_filter_mode='min_pagb', write_mode='append', ref_seq=None):
+        bam_filter_mode='min_pagb', write_mode='append', ref_seq=None, threads=None, debug=False):
     """
-    Group variants in vcf
+    :param input_file: VCF file with variants to merge
+    :param merge_distance: merge variants within this distance
+    :return: merged VCF file
     """
     main(input_file=input_file, output_file=output_file, bam_file=bam_file, merge_distance=merge_distance,
-         fq_threshold=fq_threshold, min_reads=min_reads, bam_filter_mode=bam_filter_mode, write_mode=write_mode,
-         ref_seq=ref_seq)
+         fq_threshold=fq_threshold, bam_filter_mode=bam_filter_mode, write_mode=write_mode,
+         ref_seq=ref_seq, threads=threads, debug=debug)
 
 
 if __name__ == '__main__':
     cli()
+elif not __name__.startswith('celltics'):
+    print('WARNING:  {}: This module cannot be called using the cli library.\n'
+          'Multiprocessing does not work because of dependency on the pickle library.  Classes created at the '
+          'interpreter level cannot be pickled.\n'.format(__name__))

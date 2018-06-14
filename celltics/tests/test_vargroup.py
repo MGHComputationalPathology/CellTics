@@ -12,6 +12,7 @@ from nose.tools import assert_dict_equal, assert_true, assert_equal, assert_rais
 from vcf.model import _Record
 import numpy as np
 import os
+import sys
 import filecmp
 import celltics.tools.vargroup as vg
 from pkg_resources import resource_filename
@@ -154,7 +155,6 @@ def test_vargroup_append():
             min_reads=3, write_mode='append', bam_filter_mode='min_pagb')
     assert_true(filecmp.cmp(vcf_out, output_file))
 
-
 def test_vargroup():
     """Validates the output of the variant grouper on VCF files"""
     vcf_in = resource_filename('celltics.tests.data.files', 'vargroup_in.vcf')
@@ -180,3 +180,13 @@ def test_get_reference_seq():
     reference_seq = vg.get_reference_seq('M', start, end, seq_dict=mydict)
     assert_equal(expected_ukn_seq, reference_seq)
     assert_raises(Exception, vg.get_reference_seq, chrom, 10, 11, seq_dict={'1': 'NNNNNN'})
+
+if len(sys.argv) > 1:
+    test_vargroup_pagb()
+    test_vargroup()
+    test_vargroup_append()
+    test_add_min_read_filter()
+    test_get_indels_from_cigar()
+    test_get_reference_seq()
+    test_pagb()
+    test_split_and_trim()
