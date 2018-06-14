@@ -674,7 +674,7 @@ def cli(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_t
     :return: merged VCF file
     """
     main(input_file=input_file, output_file=output_file, bam_file=bam_file, merge_distance=merge_distance,
-         fq_threshold=fq_threshold, bam_filter_mode=bam_filter_mode, write_mode=write_mode,
+         fq_threshold=fq_threshold, min_reads=min_reads, bam_filter_mode=bam_filter_mode, write_mode=write_mode,
          ref_seq=ref_seq, threads=threads, debug=debug)
 
 
