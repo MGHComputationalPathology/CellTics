@@ -14,7 +14,9 @@ import pandas as pd
 from Bio import SeqIO
 import click
 import vcf
-from urllib2 import urlopen, URLError
+# from urllib2 import urlopen, URLError  # python2
+from urllib.request import urlopen
+from urllib.error import URLError
 from xml.parsers.expat import ExpatError
 import xmltodict
 from collections import OrderedDict, defaultdict
@@ -187,9 +189,9 @@ class VariantGroup(object):
 
             # SNPs
             if var_type == 'snp':
-                for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],
-                                                       read_df[read_overlap_mask]['read'],
-                                                       read_df[read_overlap_mask]['indels']):
+                # for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],  # python2
+                for rn, read, indels in zip(read_df[read_overlap_mask]['rn'], read_df[read_overlap_mask]['read'],
+                                            read_df[read_overlap_mask]['indels']):
                     # get start position using the cigar string to find the offset
                     variant_start = self._get_start(variant, read.reference_start, read.cigar, ignore_softclip=True)
                     # If the base matches the alternate read add it to the existence array
@@ -528,7 +530,7 @@ def dict_chunks(udict, nchunks):
             chroms[i] = chrom
             tsize = 0
         last = chrom
-    chrom_chunks = chunks(nchunks, chroms.values())
+    chrom_chunks = chunks(nchunks, list(chroms.values()))
     cloc = {}
     for i, chrom_arr in enumerate(chrom_chunks):
         for chrom in chrom_arr:
