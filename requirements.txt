@@ -6,3 +6,5 @@ pysam
 pyvcf
 xmltodict
 numpy
+pandas
+pylint
