@@ -3,8 +3,8 @@ Center for Integrated Diagnostics at Mass General Hospital NGS tools
 
 ## Installation
 ```
-virtualenv --python=/path/to/python2.7 venv
-source venv/bin/activate
+virtualenv --python=/path/to/python3 venv3
+source venv3/bin/activate
 python setup.py install
 ```
 
@@ -24,6 +24,9 @@ If a reference sequence is not supplied the UCSC hg19 api is queried ([http://ge
 
 ### Algorithm
 ![VarGrouper](https://github.com/MGHComputationalPathology/CellTics/blob/master/celltics/docs/graphics/vargrouper_flow.png)
+
+###Version 2.0
+- converted from python 2.7 to python 3
 
 ### Contact
 
