@@ -12,6 +12,7 @@ import os
 import sys
 import filecmp
 import celltics.tools.vargroup as vg
+from celltics.lib import get_indel_from_cigar
 from pkg_resources import resource_filename
 from Bio import SeqIO
 
@@ -24,7 +25,7 @@ def test_get_indels_from_cigar():
 
     for value in [True, False]:
         # pylint:disable=protected-access
-        assert_dict_equal(results[value], vg.VariantGroup._get_indel_from_cigar(cigar, ignore_softclip=value))
+        assert_dict_equal(results[value], get_indel_from_cigar(cigar, ignore_softclip=value))
 
 
 def test_split_and_trim():

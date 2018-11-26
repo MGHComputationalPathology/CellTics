@@ -26,6 +26,7 @@ If a reference sequence is not supplied the UCSC hg19 api is queried ([http://ge
 ![VarGrouper](https://github.com/MGHComputationalPathology/CellTics/blob/master/celltics/docs/graphics/vargrouper_flow.png)
 
 ### Version 2.0
+- added multiprocessing
 - converted from python 2.7 to python 3
 
 ### Contact
