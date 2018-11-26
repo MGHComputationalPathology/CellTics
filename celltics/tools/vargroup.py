@@ -201,9 +201,9 @@ class VariantGroup(object):
 
             # Insertions/Deletions
             elif is_indel:
-                for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],
-                                                       read_df[read_overlap_mask]['read'],
-                                                       read_df[read_overlap_mask]['indels']):
+                # for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],  # python2
+                for rn, read, indels in zip(read_df[read_overlap_mask]['rn'], read_df[read_overlap_mask]['read'],
+                                            read_df[read_overlap_mask]['indels']):
                     iloc = self._get_indel_pos(variant.POS, read)
                     # If the insertion/deletion exist in the cigar string add it to the existence array
                     if is_deletion and iloc in indels and indels[iloc][0] == 'D':  # Deletions
@@ -287,7 +287,8 @@ class VariantGroup(object):
         """
         indels = self._get_indel_from_cigar(cigar, ignore_softclip)
         start = variant.POS - reference_start - 1
-        for pos, val in indels.iteritems():
+        # for pos, val in indels.iteritems(): # python2
+        for pos, val in indels.items():
             if pos > start:
                 break
             if val[0] == 'I':
@@ -314,8 +315,8 @@ class VariantGroup(object):
         self.a_not_b_array = np.zeros((n_variants, n_variants))
         self.b_not_a_array = np.zeros((n_variants, n_variants))
 
-        for i in xrange(n_variants):  # for each variant
-            for j in xrange(i):  # create a relationship matrix
+        for i in range(n_variants):  # for each variant
+            for j in range(i):  # create a relationship matrix
                 covered = (reads_coverage[:, i] == 1) & (reads_coverage[:, j] == 1)
                 self.coverage_array[i, j] = np.sum(covered)
                 self.existence_array[i, j] = np.sum((reads_existence[:, i] == 1) & (reads_existence[:, j] == 1))
