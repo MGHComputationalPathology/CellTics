@@ -8,6 +8,12 @@ source venv3/bin/activate
 python setup.py install
 ```
 
+If you receive an error pertaining to lzma.h you may need to disable lzma and try python setup.py install again. (This occurs on MacOS Mojave)
+```
+export HTSLIB_CONFIGURE_OPTIONS=--disable-lzma
+python setup.py install
+```
+
 ## VarGroup
 Scans a vcf file and combines multiple nearby SNPs and indels into a single genomic event.
 
