@@ -5,9 +5,6 @@
 
 """
 
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from nose.tools import assert_dict_equal, assert_true, assert_equal, assert_raises
 from vcf.model import _Record
 import numpy as np
@@ -15,6 +12,7 @@ import os
 import sys
 import filecmp
 import celltics.tools.vargroup as vg
+from celltics.lib import get_indel_from_cigar
 from pkg_resources import resource_filename
 from Bio import SeqIO
 
@@ -27,7 +25,7 @@ def test_get_indels_from_cigar():
 
     for value in [True, False]:
         # pylint:disable=protected-access
-        assert_dict_equal(results[value], vg.VariantGroup._get_indel_from_cigar(cigar, ignore_softclip=value))
+        assert_dict_equal(results[value], get_indel_from_cigar(cigar, ignore_softclip=value))
 
 
 def test_split_and_trim():
@@ -155,6 +153,7 @@ def test_vargroup_append():
             min_reads=3, write_mode='append', bam_filter_mode='min_pagb')
     assert_true(filecmp.cmp(vcf_out, output_file))
 
+
 def test_vargroup():
     """Validates the output of the variant grouper on VCF files"""
     vcf_in = resource_filename('celltics.tests.data.files', 'vargroup_in.vcf')
@@ -180,6 +179,7 @@ def test_get_reference_seq():
     reference_seq = vg.get_reference_seq('M', start, end, seq_dict=mydict)
     assert_equal(expected_ukn_seq, reference_seq)
     assert_raises(Exception, vg.get_reference_seq, chrom, 10, 11, seq_dict={'1': 'NNNNNN'})
+
 
 if len(sys.argv) > 1:
     test_vargroup_pagb()

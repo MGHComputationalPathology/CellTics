@@ -4,7 +4,8 @@ set -e
 
 
 #ignored-modules=cosmos since pylint keep compalining about not being able to import cosmos
-pylint --disable=I0011,R0201,E711,E712,E0012 celltics/
+# R0205 - unless-object-inheritance - allow class declarations to explicitly inherit from object w/o complaining
+pylint --disable=I0011,R0201,E711,E712,E0012,R0205 celltics/
 
 
 # Disable F401: unused imports. Only really applies to __init__.py files, since all other unused imports

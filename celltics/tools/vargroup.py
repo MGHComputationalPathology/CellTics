@@ -7,24 +7,22 @@ Started by Ryan Schmidt in R - https://bitbucket.org/mghcid/cidtools/branch/rs_v
 Pythonized by Allison MacLeay
 
 """
-from __future__ import print_function
-from __future__ import absolute_import
 
 import pandas as pd
 from Bio import SeqIO
 import click
 import vcf
-from urllib2 import urlopen, URLError
+# from urllib2 import urlopen, URLError  # python2
+from urllib.request import urlopen
+from urllib.error import URLError
 from xml.parsers.expat import ExpatError
 import xmltodict
 from collections import OrderedDict, defaultdict
 import pysam
 import numpy as np
-from celltics.lib import CIGAR_CODES
-from celltics.lib import chunks
+from celltics.lib import chunks, get_indel_from_cigar
 import time
 import multiprocessing as mp
-import itertools
 
 
 MAX_GROUPED = 200
@@ -163,7 +161,7 @@ class VariantGroup(object):
 
         # Convert some key read information into a dataframe to speed up filtering
         read_df = pd.DataFrame(columns=['rn', 'start', 'end', 'read', 'indels'],
-                               data=[(rn, read.reference_start, read.aend, read, self._get_indel_from_cigar(read.cigar))
+                               data=[(rn, read.reference_start, read.aend, read, get_indel_from_cigar(read.cigar))
                                      for rn, read in enumerate(vargroup_reads)])
 
         reads_coverage = np.zeros((len(vargroup_reads), len(self.variant_list)))
@@ -187,9 +185,9 @@ class VariantGroup(object):
 
             # SNPs
             if var_type == 'snp':
-                for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],
-                                                       read_df[read_overlap_mask]['read'],
-                                                       read_df[read_overlap_mask]['indels']):
+                # for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],  # python2
+                for rn, read, indels in zip(read_df[read_overlap_mask]['rn'], read_df[read_overlap_mask]['read'],
+                                            read_df[read_overlap_mask]['indels']):
                     # get start position using the cigar string to find the offset
                     variant_start = self._get_start(variant, read.reference_start, read.cigar, ignore_softclip=True)
                     # If the base matches the alternate read add it to the existence array
@@ -199,9 +197,9 @@ class VariantGroup(object):
 
             # Insertions/Deletions
             elif is_indel:
-                for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],
-                                                       read_df[read_overlap_mask]['read'],
-                                                       read_df[read_overlap_mask]['indels']):
+                # for rn, read, indels in itertools.izip(read_df[read_overlap_mask]['rn'],  # python2
+                for rn, read, indels in zip(read_df[read_overlap_mask]['rn'], read_df[read_overlap_mask]['read'],
+                                            read_df[read_overlap_mask]['indels']):
                     iloc = self._get_indel_pos(variant.POS, read)
                     # If the insertion/deletion exist in the cigar string add it to the existence array
                     if is_deletion and iloc in indels and indels[iloc][0] == 'D':  # Deletions
@@ -212,7 +210,7 @@ class VariantGroup(object):
             else:
                 print('Warning: Unknown type found: {}'.format(variant.var_type))
 
-        self._build_existence_matrix(reads_existence, reads_coverage)
+        return self._build_existence_matrix(reads_existence, reads_coverage)
 
     def set_filter_fq_pab(self, threshold):
         """ Set a filter on the frequency of observing 2 variants together
@@ -257,23 +255,6 @@ class VariantGroup(object):
         arlen = len(self.variant_list)
         self.filter = np.zeros((arlen, arlen)) == 0
 
-    @staticmethod
-    def _get_indel_from_cigar(cigar, ignore_softclip=False):
-        """
-        Get a dictionary of positions and cigar codes
-        :param cigar:
-        :param ignore_softclip: does not add softclip bases to position.  Needed for SNV start position
-        :return: {pos: cigar_code, pos: cigar_code}
-        """
-        pos = 0
-        indels = {}
-        for indel, num in cigar:
-            if CIGAR_CODES[indel] in 'DI':
-                indels[pos - 1] = (CIGAR_CODES[indel], num)
-            if CIGAR_CODES[indel] != 'S' or not ignore_softclip:
-                pos += num
-        return indels
-
     def _get_start(self, variant, reference_start, cigar, ignore_softclip=False):
         """
         Return the read start from reference start position and cigar string
@@ -283,9 +264,10 @@ class VariantGroup(object):
         :param ignore_softclip: does not add softclip bases to position.  Needed for SNV start position
         :return:
         """
-        indels = self._get_indel_from_cigar(cigar, ignore_softclip)
+        indels = get_indel_from_cigar(cigar, ignore_softclip)
         start = variant.POS - reference_start - 1
-        for pos, val in indels.iteritems():
+        # for pos, val in indels.iteritems(): # python2
+        for pos, val in indels.items():
             if pos > start:
                 break
             if val[0] == 'I':
@@ -312,8 +294,8 @@ class VariantGroup(object):
         self.a_not_b_array = np.zeros((n_variants, n_variants))
         self.b_not_a_array = np.zeros((n_variants, n_variants))
 
-        for i in xrange(n_variants):  # for each variant
-            for j in xrange(i):  # create a relationship matrix
+        for i in range(n_variants):  # for each variant
+            for j in range(i):  # create a relationship matrix
                 covered = (reads_coverage[:, i] == 1) & (reads_coverage[:, j] == 1)
                 self.coverage_array[i, j] = np.sum(covered)
                 self.existence_array[i, j] = np.sum((reads_existence[:, i] == 1) & (reads_existence[:, j] == 1))
@@ -528,7 +510,7 @@ def dict_chunks(udict, nchunks):
             chroms[i] = chrom
             tsize = 0
         last = chrom
-    chrom_chunks = chunks(nchunks, chroms.values())
+    chrom_chunks = chunks(nchunks, list(chroms.values()))
     cloc = {}
     for i, chrom_arr in enumerate(chrom_chunks):
         for chrom in chrom_arr:
@@ -648,7 +630,8 @@ def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_
 
 
 @click.group(invoke_without_command=True)
-@click.option('--input-file', '-i', required=True, type=click.Path(exists=True), help='Path to input VarVetter input file (required)')
+@click.option('--input-file', '-i', required=True, type=click.Path(exists=True),
+              help='Path to input VarVetter input file (required)')
 @click.option('--output-file', '-o', required=True, help='Path to output VarVetter input file (required)')
 @click.option('--bam-file', '-b', help='Path to bam file')
 @click.option('--merge-distance', '-m', default=9, help='Find all variants within X bases. (default=9)')

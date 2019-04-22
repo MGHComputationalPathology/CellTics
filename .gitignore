@@ -1,3 +1,6 @@
+# CellTics
+celltics/tests/data/files/vargroup_test*.vcf
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
