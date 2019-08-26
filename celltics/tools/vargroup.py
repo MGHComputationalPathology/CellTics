@@ -58,7 +58,7 @@ class PickleMe(object):
 
     def get_fat(self):
         """ convert data flattened for the pickle library to original version (or close to it) """
-        if len(self.records) == 0:
+        if len(self.records) == 0 or self.records[0].FORMAT is None:
             return self.records, self.var_dict
         fields = [fld for fld in self.records[0].FORMAT.split(':')]
         calldata = vcf.model.make_calldata_tuple(fields)
@@ -452,6 +452,8 @@ def get_reference_seq_ucsc(chrom, start, end):
     :param end:
     :return: dna reference sequence
     """
+    if chrom.startswith('chr'):
+        chrom = chrom.replace('chr', '')
     request = 'http://genome.ucsc.edu/cgi-bin/das/hg19/dna?segment=chr{}:{},{}'.format(chrom, start, end)
     try:
         dna = xmltodict.parse(urlopen(request).read())['DASDNA']['SEQUENCE']['DNA']['#text'].replace('\n', '')
@@ -592,7 +594,7 @@ def bam_and_merge_multiprocess(bam_file, vars_to_group, fq_threshold, min_reads,
     var_chunks, chrom_pos = dict_chunks(vars_to_group, nthreads)
     refs = split_ref_seq(fdict, chrom_pos, len(var_chunks))
     del fdict
-    if not debug:
+    if not debug and nthreads > 1:
         pool = mp.Pool(processes=nthreads)
         res = [pool.apply_async(bam_and_merge, args=(bam_file, achunk, fq_threshold, min_reads, bam_filter_mode,
                                                      ref)) for achunk, ref in zip(var_chunks, refs)]
@@ -603,7 +605,7 @@ def bam_and_merge_multiprocess(bam_file, vars_to_group, fq_threshold, min_reads,
     records = []
     var_dict = {}
     for r in res:
-        recs, var_dict_part = r.get().get_fat() if not debug else r.get_fat()
+        recs, var_dict_part = r.get().get_fat() if not debug and nthreads > 1 else r.get_fat()
         records.extend(recs)
         var_dict.update(var_dict_part)
     how_long = time.time() - start
@@ -615,7 +617,7 @@ def bam_and_merge_multiprocess(bam_file, vars_to_group, fq_threshold, min_reads,
 def main(input_file=None, output_file=None, bam_file=None, merge_distance=9, fq_threshold=0, min_reads=3,
          bam_filter_mode='pagb', write_mode='append', ref_seq=None, threads=None, debug=False):
     """the main function"""
-    nthreads = mp.cpu_count() if threads is None else min(threads, mp.cpu_count())
+    nthreads = mp.cpu_count() if threads is None else min(int(threads), mp.cpu_count())
     print('Grouping file: {}'.format(input_file))
     merge_distance = int(merge_distance)
     with open(input_file, 'r') as openfile:
