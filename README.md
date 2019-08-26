@@ -62,5 +62,5 @@ Errors are not very informative when masked by the python multithreading module.
 
 ### Contact
 
-* [Allison MacLeay](mailto:amacleay@mgh.harvard.edu)
+* [Allison MacLeay](mailto:allison.macleay@gmail.com)
 * [Ryan Schmidt](mailto:RSCHMIDT@BWH.HARVARD.EDU)
