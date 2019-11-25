@@ -344,7 +344,7 @@ def inspect_bam(bam_file, variant_dict, threshold, min_reads, filter_type='pagb'
     valid_variants = {}
     rejected_variants = []
     for key in variant_dict:
-        vargroup = VariantGroup(key, variant_dict[key])
+        vargroup = VariantGroup(key, variant_dict[key]['list'])
         if len(vargroup.variant_list) > MAX_GROUPED:  # TODO: split into smaller groups
             print('Skipping variant group {} ({} of {})\nSize: {}  Chrom: {}  Start: {}  End: {}'
                   ''.format(key, variant_dict.keys().index(key), len(variant_dict.keys()), len(vargroup.variant_list),
@@ -396,8 +396,8 @@ def merge_records(variant_info, group_id, seq_dict=None):
     chrom = variants[0].CHROM
     start = min([variant.POS for variant in variants])
     info = variants[0].INFO
-    info['ALT_DP'] = variant_info['dp']
-    info['ALT_AF'] = variant_info['af']
+    info['ALT_DP'] = variant_info.get('dp', 0)
+    info['ALT_AF'] = variant_info.get('af', 0)
     end = max([variant.end for variant in variants])
     ref = get_reference_seq(chrom, start, end, seq_dict)
     alt = ref
@@ -505,9 +505,9 @@ def parse_vcf(reader, merge_distance, skip_overlap):
             # Add to data structure
             if current_group is None:
                 current_group = '_'.join([last_record.CHROM, str(last_record.POS)])
-                vars_to_group[current_group] = [last_record, record]
+                vars_to_group[current_group] = {'list': [last_record, record]}
             else:
-                vars_to_group[current_group].append(record)
+                vars_to_group[current_group]['list'].append(record)
         else:
             current_group = None
             not_aggregated.append(record)

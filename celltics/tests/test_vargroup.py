@@ -136,10 +136,10 @@ def test_vargroup_pagb():
     """Validates the output of the variant grouper on VCF files using P(A|B) mode"""
     vcf_in = resource_filename('celltics.tests.data.files', 'vargroup_in.vcf')
     bam = resource_filename('celltics.tests.data.files', 'vargroup.bam')
-    vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_out.vcf')
-    output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_output_pagb.vcf')
+    vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_out_v2.vcf')
+    output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_output_pagb_v2.vcf')
     vg.main(input_file=vcf_in, output_file=output_file, bam_file=bam, merge_distance=1000, fq_threshold=50,
-            bam_filter_mode='max_pagb', write_mode='merged_only')
+            bam_filter_mode='max_pagb', write_mode='merged_only', debug=True)
     assert_true(filecmp.cmp(vcf_out, output_file))
 
 
@@ -147,10 +147,10 @@ def test_vargroup_append():
     """Validates the output of the variant grouper appending to VCF files"""
     vcf_in = resource_filename('celltics.tests.data.files', 'vargroup_in.vcf')
     bam = resource_filename('celltics.tests.data.files', 'vargroup.bam')
-    vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_append_out.vcf')
-    output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_append_output.vcf')
+    vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_append_out_v2.vcf')
+    output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_append_output_v2.vcf')
     vg.main(input_file=vcf_in, output_file=output_file, bam_file=bam, merge_distance=50, fq_threshold=50,
-            min_reads=3, write_mode='append', bam_filter_mode='min_pagb')
+            min_reads=3, write_mode='append', bam_filter_mode='min_pagb', debug=True)
     assert_true(filecmp.cmp(vcf_out, output_file))
 
 
@@ -158,10 +158,10 @@ def test_vargroup():
     """Validates the output of the variant grouper on VCF files"""
     vcf_in = resource_filename('celltics.tests.data.files', 'vargroup_in.vcf')
     bam = resource_filename('celltics.tests.data.files', 'vargroup.bam')
-    vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_out.vcf')
-    output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_output.vcf')
+    vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_out_v2.vcf')
+    output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_output_v2.vcf')
     vg.main(input_file=vcf_in, output_file=output_file, bam_file=bam, merge_distance=1000, fq_threshold=5,
-            write_mode='merged_only', bam_filter_mode='pab', debug=True)
+            write_mode='merged_only', bam_filter_mode='pab')
     assert_true(filecmp.cmp(vcf_out, output_file))
 
 
@@ -182,7 +182,7 @@ def test_get_reference_seq():
 
 
 if len(sys.argv) > 1:
-    #test_vargroup_pagb()
+    test_vargroup_pagb()
     test_vargroup()
     test_vargroup_append()
     test_add_min_read_filter()
