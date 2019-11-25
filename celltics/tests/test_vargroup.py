@@ -161,7 +161,7 @@ def test_vargroup():
     vcf_out = resource_filename('celltics.tests.data.files', 'vargroup_out.vcf')
     output_file = os.path.join(os.path.dirname(vcf_out), 'vargroup_test_output.vcf')
     vg.main(input_file=vcf_in, output_file=output_file, bam_file=bam, merge_distance=1000, fq_threshold=5,
-            write_mode='merged_only', bam_filter_mode='pab')
+            write_mode='merged_only', bam_filter_mode='pab', debug=True)
     assert_true(filecmp.cmp(vcf_out, output_file))
 
 
@@ -182,7 +182,7 @@ def test_get_reference_seq():
 
 
 if len(sys.argv) > 1:
-    test_vargroup_pagb()
+    #test_vargroup_pagb()
     test_vargroup()
     test_vargroup_append()
     test_add_min_read_filter()

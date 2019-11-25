@@ -43,7 +43,7 @@ class PickleMe(object):
         """
         rev_dict = defaultdict(list)
         for group in variant_groups:
-            for variant in variant_groups[group]:
+            for variant in variant_groups[group]['list']:
                 variant_id = get_id(variant)
                 rev_dict[variant_id].append(group)
         return rev_dict
@@ -219,6 +219,21 @@ class VariantGroup(object):
         frequency_table = self._get_existence_frequency()
         self.filter = frequency_table > threshold
 
+    def get_af(self):
+        """ return minimum allele frequency for the variants """
+        frequency_table = self._get_existence_frequency()
+        greater_than_zero = frequency_table[frequency_table > 0]
+        if len(greater_than_zero):
+            return min(greater_than_zero)
+        return 0
+
+    def get_df(self):
+        """ return minimum depth for the variants """
+        greater_than_zero = self.coverage_array[self.coverage_array > 0]
+        if len(greater_than_zero):
+            return min(greater_than_zero)
+        return 0
+
     def set_filter_fq_pagb(self, threshold, take_max):
         """ Set a filter on the frequency of observing 2 variants together
             Probability of A given B -> P(A|B)
@@ -354,7 +369,9 @@ def inspect_bam(bam_file, variant_dict, threshold, min_reads, filter_type='pagb'
                     pass
                     # print('No variant groups from {} passed the threshold of {}'.format(key, threshold))
                 else:
-                    valid_variants[s_key] = s_vargroup.variant_list
+                    valid_variants[s_key] = {'list': s_vargroup.variant_list,
+                                             'af': s_vargroup.get_af(),
+                                             'dp': s_vargroup.get_df()}
         else:
             rejected_variants.extend(vargroup.variant_list)
 
@@ -369,15 +386,18 @@ def get_id(variant):
     return '{}_{}_{}_{}'.format(variant.CHROM, variant.POS, variant.REF, variant.ALT[0])
 
 
-def merge_records(variants, group_id, seq_dict=None):
+def merge_records(variant_info, group_id, seq_dict=None):
     """
     merge one list of variants
     """
     # pylint: disable=too-many-locals
+    variants = variant_info['list']
     nvariants = len(variants)
     chrom = variants[0].CHROM
     start = min([variant.POS for variant in variants])
     info = variants[0].INFO
+    info['ALT_DP'] = variant_info['dp']
+    info['ALT_AF'] = variant_info['af']
     end = max([variant.end for variant in variants])
     ref = get_reference_seq(chrom, start, end, seq_dict)
     alt = ref
