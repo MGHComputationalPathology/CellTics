@@ -396,6 +396,7 @@ def merge_records(variant_info, group_id, seq_dict=None):
     chrom = variants[0].CHROM
     start = min([variant.POS for variant in variants])
     info = variants[0].INFO
+    # TODO - This is overwritten below.  Fix this
     info['ALT_DP'] = variant_info.get('dp', 0)
     info['ALT_AF'] = variant_info.get('af', 0)
     end = max([variant.end for variant in variants])
