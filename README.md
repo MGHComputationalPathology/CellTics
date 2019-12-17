@@ -59,7 +59,7 @@ python celltics/tools/vargroup.py --input-file sorted_variants.vcf --output-file
 ```
 If a reference sequence is not supplied the UCSC hg19 api is queried ([http://genome.ucsc.edu/](http://genome.ucsc.edu/)).  Variants will be grouped if they are within a certain distance and occur on the same reads.  For more advanced options run ```celltics vargroup --help```.
 
-##Troubleshooting
+### Troubleshooting
 Errors are not very informative when masked by the python multithreading module.  Run vargroup with --debug and error messages are more informative.
 
 ### Algorithm
