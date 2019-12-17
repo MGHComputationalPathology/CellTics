@@ -40,13 +40,22 @@ python /path/to/celltics/tools/vargroup.py -i <input> -o <output>
 VarGrouper runs multithreaded by default.  Use --debug or set threads to 1 (-t 1) to avoid multiprocessing.
 
 ### Simplest vargroup command
+_This will produce a warning if invoked with the cli library._
 ```bash
 celltics vargroup --input-file sorted_variants.vcf --output-file grouped_variants.vcf --ref-seq hg19.fasta -t 1
+```
+or (no warning message)
+```bash
+python celltics/tools/vargroup.py --input-file sorted_variants.vcf --output-file grouped_variants.vcf --ref-seq hg19.fasta -t 1
 ```
 
 ### Run vargroup with bam
 ```bash
-celltics vargroup --input-file sorted_variants.vcf --output-file grouped_variants.vcf --bam-file sorted_alignment.bam --ref-seq hg19.fasta -t 1
+celltics vargroup --input-file sorted_variants.vcf --output-file grouped_variants.vcf --bam-file sorted_alignment.bam --ref-seq hg19.fasta -t
+```
+or (no warning message)
+```bash
+python celltics/tools/vargroup.py --input-file sorted_variants.vcf --output-file grouped_variants.vcf --bam-file sorted_alignment.bam --ref-seq hg19.fasta -t 1
 ```
 If a reference sequence is not supplied the UCSC hg19 api is queried ([http://genome.ucsc.edu/](http://genome.ucsc.edu/)).  Variants will be grouped if they are within a certain distance and occur on the same reads.  For more advanced options run ```celltics vargroup --help```.
 
