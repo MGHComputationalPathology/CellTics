@@ -587,9 +587,8 @@ def bam_and_merge_multiprocess(bam_file, vars_to_group, fq_threshold, min_reads,
                                debug=False):
     """ Multiprocess inspect bam and merge step together """
     fdict = None
-    if bam_file is not None:
-        if ref_seq is not None:
-            print('Opening reference sequence: {}'.format(ref_seq))
+    if ref_seq is not None:
+        print('Opening reference sequence: {}'.format(ref_seq))
         fdict = get_ref_seq_dict(ref_seq)
     start = time.time()
     var_chunks, chrom_pos = dict_chunks(vars_to_group, nthreads)
