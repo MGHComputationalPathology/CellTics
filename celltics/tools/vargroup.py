@@ -95,7 +95,7 @@ class VariantGroup(object):
         :param append_chr: whether to prefix with 'chr'
         :return: string of chromosome name
         """
-        if append_chr:
+        if append_chr and 'chr' not in self.chrom:
             return 'chr{}'.format(self.chrom)
         return self.chrom
 
@@ -281,7 +281,20 @@ class VariantGroup(object):
         hardclipped = 0 if read.cigartuples[0][0] != 5 else read.cigartuples[0][1]  # read location must be adjusted for
         # number of hardclipped bases represented in cigar but not in read_seq  https://www.biostars.org/p/119537/
         iloc = variant_pos - read.reference_start + read.query_alignment_start - 1 + hardclipped
-        return iloc
+        rpos = 0
+        insertions = 0
+        deletions = 0
+        for cig in read.cigartuples:  # adjust for insertions before variant
+            rpos += cig[1]
+            if cig[0] == 1:  # insertion
+                insertions += cig[1]
+                rpos -= cig[1]
+            if cig[0] == 2:  # deletion
+                deletions -= cig[1]
+                rpos += cig[1]
+            if rpos > iloc:
+                break
+        return iloc + insertions + deletions
 
     def _build_existence_matrix(self, reads_existence, reads_coverage):
         self.exists = False
@@ -386,7 +399,14 @@ def merge_records(variants, group_id, seq_dict=None):
     shift = 0
     for variant in sorted(variants, key=lambda var: int(var.POS)):
         var_len = variant.end - variant.POS + 1
-        var_alt = [sub.sequence for sub in variant.ALT]
+        try:
+            var_alt = [sub.sequence for sub in variant.ALT]
+        except AttributeError as e:
+            msg = "\nError Merging Records:  For use with this tool all variants are expected to have ALT sequences. " \
+                  "In the case of deletions, the base before the deletion is expected " \
+                  "as the ALT value."
+            e.args = (e.args[0] + msg,)
+            raise e
         if variant.is_deletion:
             del_length = variant.end - variant.POS
             alt = alt[:shift + variant.POS - start] + "".join(var_alt) + \
